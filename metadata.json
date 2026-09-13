@@ -1,0 +1,6 @@
+{
+  "name": "مجلة غزالتي",
+  "description": "مجلة غزالتي - منصة أدبية وقصائد في العشق والجمال والمجرة والرحيق، بإشراف إفراهيم 2003 ونخبة من الشعراء",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
