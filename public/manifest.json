@@ -1,21 +1,9 @@
 {
-  "short_name": "ديوان إفراهيم",
-  "name": "ديوان إفراهيم 2003 للأدب والشعر",
-  "icons": [
-    {
-      "src": "https://images.unsplash.com/photo-1455390582262-044cdead277a?w=192&auto=format&fit=crop&q=80",
-      "type": "image/jpeg",
-      "sizes": "192x192"
-    },
-    {
-      "src": "https://images.unsplash.com/photo-1455390582262-044cdead277a?w=512&auto=format&fit=crop&q=80",
-      "type": "image/jpeg",
-      "sizes": "512x512"
-    }
-  ],
+  "short_name": "غزالتي",
+  "name": "مجلة غزالتي • ديوان الشعر والأدب",
   "start_url": "/",
-  "background_color": "#08080b",
-  "theme_color": "#08080b",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
   "display": "standalone",
   "orientation": "portrait",
   "dir": "rtl",

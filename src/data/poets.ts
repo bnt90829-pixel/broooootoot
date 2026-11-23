@@ -17,8 +17,8 @@ export const POETS_LIST: PoetInfo[] = [
     id: 'efrahim',
     name: 'إفراهيم 2003',
     title: 'ديوان غزالتي • إفراهيم 2003',
-    description: 'المجموعات الشعرية: غزالتي، لماذا؟، نثر غزالتي، الإنكسار، وحين يجرؤ الحبر',
-    poemsCount: 514,
+    description: 'المجموعات الشعرية: مكارهه؟، غزالتي، لماذا؟، الإنكسار، وحين يجرؤ الحبر',
+    poemsCount: 584,
     category: 'all',
     isAvailable: true,
     badge: 'الديوان الأساسي',
@@ -29,7 +29,7 @@ export const POETS_LIST: PoetInfo[] = [
     name: 'هيام محمد',
     title: 'ديوان الشاعرة هيام محمد',
     description: 'مجموعة قصائد وأشعار ووجدانيات تحاكي أعماق الروح والذاكرة والغياب',
-    poemsCount: 11,
+    poemsCount: 13,
     category: 'heyam',
     isAvailable: true,
     badge: 'ديوان مُضاف',
@@ -115,9 +115,9 @@ export function getPoetNameForPoem(poem: { category?: string; notes?: string }):
       return 'يقين محمد';
     case 'saad':
       return 'سعد غدير';
+    case 'makarah':
     case 'ghazal':
     case 'limatha':
-    case 'nathr':
     case 'inkisar':
     case 'habr':
       return 'إفراهيم 2003';

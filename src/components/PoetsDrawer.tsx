@@ -3,6 +3,7 @@ import { X, Feather, Sparkles, User, PlusCircle, Check, ArrowLeft } from 'lucide
 import { POETS_LIST, PoetInfo } from '../data/poets';
 import { PoemCategory, BookTheme } from '../types';
 import { THEMES } from '../utils/theme';
+import { toEasternArabicNumerals, AndalusianRosette } from './LiteraryDecorations';
 
 interface PoetsDrawerProps {
   isOpen: boolean;
@@ -20,26 +21,30 @@ export function PoetsDrawer({
   theme = 'midnight',
 }: PoetsDrawerProps) {
   const activeTheme = THEMES[theme] || THEMES.midnight;
+  const availablePoets = POETS_LIST.filter((p) => p.isAvailable);
+  const upcomingPoets = POETS_LIST.filter((p) => !p.isAvailable);
+
   return (
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex justify-end font-serif select-none">
-          {/* Backdrop blur & dark overlay */}
+          {/* Dark overlay */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity"
+            className="fixed inset-0 bg-black/75"
           />
 
-          {/* Drawer content sliding in from right / start in RTL */}
+          {/* Drawer content sliding in */}
           <motion.aside
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-            className={`relative w-full max-w-md ${activeTheme.drawerBg} border-r sm:border-l ${activeTheme.drawerBorder} ${activeTheme.textPrimary} h-full shadow-2xl flex flex-col z-10 overflow-hidden transition-colors duration-300`}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className={`relative w-full max-w-md ${activeTheme.drawerBg} border-r sm:border-l ${activeTheme.drawerBorder} ${activeTheme.textPrimary} h-full shadow-2xl flex flex-col z-10 overflow-hidden transition-colors duration-200`}
           >
             {/* Antique decorative top border */}
             <div className="h-1 w-full bg-gradient-to-r from-transparent via-[#c5a059] to-transparent opacity-70" />
@@ -63,7 +68,7 @@ export function PoetsDrawer({
               <button
                 id="close-poets-drawer-btn"
                 onClick={onClose}
-                className={`w-8 h-8 rounded-sm border ${activeTheme.cardBorder} flex items-center justify-center ${activeTheme.textSecondary} hover:${activeTheme.textPrimary} hover:${activeTheme.accentBorder} transition-all cursor-pointer`}
+                className={`w-8 h-8 rounded-sm border ${activeTheme.cardBorder} flex items-center justify-center ${activeTheme.textSecondary} ${activeTheme.textPrimaryHover} ${activeTheme.cardHoverBorder} transition-colors cursor-pointer`}
                 title="إغلاق القائمة"
               >
                 <X size={16} />
@@ -78,7 +83,7 @@ export function PoetsDrawer({
               </div>
 
               {/* Available Poets */}
-              {POETS_LIST.filter((p) => p.isAvailable).map((poet) => {
+              {availablePoets.map((poet) => {
                 const isSelected =
                   poet.category === 'all'
                     ? selectedCategory !== 'heyam' &&
@@ -93,7 +98,7 @@ export function PoetsDrawer({
                     key={poet.id}
                     id={`poet-item-${poet.id}`}
                     onClick={() => onSelectPoet(poet)}
-                    className={`group relative p-4 rounded-sm border transition-all duration-300 cursor-pointer ${
+                    className={`group relative p-4 rounded-sm border transition-colors duration-150 cursor-pointer ${
                       isSelected
                         ? `${activeTheme.cardActiveBg} border-[#c5a059] shadow-lg shadow-[#c5a059]/10`
                         : `${activeTheme.cardBg} ${activeTheme.cardBorder} ${activeTheme.cardHoverBorder} ${activeTheme.cardHoverBg}`
@@ -102,7 +107,7 @@ export function PoetsDrawer({
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div
-                          className={`w-11 h-11 rounded-sm border flex items-center justify-center transition-all ${
+                          className={`w-11 h-11 rounded-sm border flex items-center justify-center transition-colors ${
                             isSelected
                               ? 'border-[#c5a059] bg-[#c5a059] text-[#0a0a0c]'
                               : `${activeTheme.cardBorder} ${activeTheme.badgeBg} ${activeTheme.accent} group-hover:border-[#c5a059]`
@@ -112,7 +117,7 @@ export function PoetsDrawer({
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h4 className={`font-amiri text-lg font-bold ${activeTheme.textPrimary} group-hover:${activeTheme.accent} transition-colors`}>
+                            <h4 className={`font-amiri text-lg font-bold ${activeTheme.textPrimary} ${activeTheme.accentGroupHover} transition-colors`}>
                               {poet.name}
                             </h4>
                             {isSelected && (
@@ -128,8 +133,9 @@ export function PoetsDrawer({
                         </div>
                       </div>
 
-                      <span className={`text-[10px] font-mono tracking-widest ${activeTheme.textSecondary} px-2 py-0.5 rounded-sm ${activeTheme.badgeBg} border ${activeTheme.badgeBorder} shrink-0`}>
-                        {poet.poemsCount} نصوص
+                      <span className={`text-[11px] font-amiri tracking-wider ${activeTheme.accent} px-2.5 py-0.5 rounded-sm ${activeTheme.badgeBg} border ${activeTheme.badgeBorder} shrink-0 font-bold flex items-center gap-1`}>
+                        <AndalusianRosette size={9} color="currentColor" />
+                        <span>{toEasternArabicNumerals(poet.poemsCount)} نصوص</span>
                       </span>
                     </div>
 
@@ -156,7 +162,7 @@ export function PoetsDrawer({
                 </div>
 
                 <div className="space-y-3">
-                  {POETS_LIST.filter((p) => !p.isAvailable).map((poet) => (
+                  {upcomingPoets.map((poet) => (
                     <div
                       key={poet.id}
                       className={`p-4 rounded-sm border border-dashed ${activeTheme.cardBorder} ${activeTheme.cardBg} opacity-80 hover:opacity-100 transition-opacity`}

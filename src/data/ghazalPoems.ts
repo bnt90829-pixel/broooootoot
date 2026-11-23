@@ -1,6 +1,8 @@
 import { Poem } from '../types';
+import { NEW_GHAZAL_NOTES } from './newGhazalNotes';
+import { SURREAL_GHAZAL_PHRASES } from './surrealGhazalPhrases';
 
-export const GHAZAL_POEMS: Poem[] = [
+const EXISTING_GHAZAL_POEMS: Poem[] = [
   {
     id: 'ghazalati-1',
     title: 'كُحْلُ المَسَاء',
@@ -1289,4 +1291,17 @@ export const GHAZAL_POEMS: Poem[] = [
     ],
     notes: '— إفراهيم 2003'
   }
+];
+
+// Combine the 53 newest phrases at the very top (حديثاً من الأعلى), followed by the 57 notes, then existing poems
+export const GHAZAL_POEMS: Poem[] = [
+  ...SURREAL_GHAZAL_PHRASES,
+  ...NEW_GHAZAL_NOTES.map((poem, idx) => ({
+    ...poem,
+    pageNumber: SURREAL_GHAZAL_PHRASES.length + idx + 1,
+  })),
+  ...EXISTING_GHAZAL_POEMS.map((poem, idx) => ({
+    ...poem,
+    pageNumber: SURREAL_GHAZAL_PHRASES.length + NEW_GHAZAL_NOTES.length + idx + 1,
+  })),
 ];

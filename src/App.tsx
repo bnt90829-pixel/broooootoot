@@ -4,13 +4,14 @@
  */
 
 import { useState, useEffect, useRef, MouseEvent, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { POEMS } from './data/poems';
 import { Poem, PoemCategory, ViewState, BookTheme, BookFont } from './types';
 import { THEMES } from './utils/theme';
 import { CoverScreen } from './components/CoverScreen';
 import { LibraryScreen } from './components/LibraryScreen';
 import { ReaderScreen } from './components/ReaderScreen';
+import { safeStorage } from './utils/safeStorage';
 
 const BOOKMARKS_STORAGE_KEY = 'efrahim_bookmarked_poems_v1';
 const LAST_VIEW_KEY = 'efrahim_last_view_state_v1';
@@ -19,16 +20,41 @@ const READER_THEME_STORAGE_KEY = 'efrahim_reader_theme_v1';
 const READER_FONT_STORAGE_KEY = 'efrahim_reader_font_v1';
 const READER_FONT_SIZE_STORAGE_KEY = 'efrahim_reader_font_size_v1';
 
+const POET_CATEGORIES = new Set(['heyam', 'sultan', 'salim', 'yaqeen', 'saad']);
+
+// Pre-build O(1) poem lookup map once
+const POEMS_BY_ID = new Map<string, Poem>(POEMS.map((p) => [p.id, p]));
+
+// Safe history navigation that never triggers iframe reload
+function safePushHistory(state: Record<string, unknown>, title: string, url: string) {
+  try {
+    if (window.history && typeof window.history.pushState === 'function') {
+      window.history.pushState(state, title, url);
+    }
+  } catch {
+    // Silently ignore in sandboxed or cross-origin iframes
+  }
+}
+
+function safeReplaceHistory(state: Record<string, unknown>, title: string, url: string) {
+  try {
+    if (window.history && typeof window.history.replaceState === 'function') {
+      window.history.replaceState(state, title, url);
+    }
+  } catch {
+    // Silently ignore
+  }
+}
+
 export default function App() {
-  // Parse initial state from hash or session
   const getInitialState = (): { view: ViewState; poemId: string; category: PoemCategory } => {
     try {
-      const hash = window.location.hash;
-      const savedCat = (sessionStorage.getItem(LAST_CATEGORY_KEY) as PoemCategory) || 'all';
+      const hash = window.location.hash || '';
+      const savedCat = (safeStorage.getSessionItem(LAST_CATEGORY_KEY) as PoemCategory) || 'all';
 
       if (hash.startsWith('#poem-')) {
         const id = hash.replace('#poem-', '');
-        const exists = POEMS.find((p) => p.id === id);
+        const exists = POEMS_BY_ID.get(id);
         if (exists) {
           return { view: 'reader', poemId: id, category: (exists.category as PoemCategory) || savedCat };
         }
@@ -37,16 +63,16 @@ export default function App() {
         const rawCat = hash.replace('#library-', '').replace('#library', '');
         const validCategory: PoemCategory =
           rawCat.length > 0 ? (rawCat as PoemCategory) : savedCat;
-        return { view: 'library', poemId: POEMS[0]?.id || 'ghazal-1', category: validCategory };
+        return { view: 'library', poemId: POEMS[0]?.id || 'makarah-1', category: validCategory };
       }
-      const savedView = sessionStorage.getItem(LAST_VIEW_KEY);
+      const savedView = safeStorage.getSessionItem(LAST_VIEW_KEY);
       if (savedView === 'library') {
-        return { view: 'library', poemId: POEMS[0]?.id || 'ghazal-1', category: savedCat };
+        return { view: 'library', poemId: POEMS[0]?.id || 'makarah-1', category: savedCat };
       }
     } catch {
       // Ignore
     }
-    return { view: 'cover', poemId: POEMS[0]?.id || 'ghazal-1', category: 'all' };
+    return { view: 'cover', poemId: POEMS[0]?.id || 'makarah-1', category: 'all' };
   };
 
   const initial = getInitialState();
@@ -58,17 +84,16 @@ export default function App() {
 
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem(BOOKMARKS_STORAGE_KEY);
+      const saved = safeStorage.getItem(BOOKMARKS_STORAGE_KEY);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
-  // Persistent Reader Customization Settings
   const [readerTheme, setReaderTheme] = useState<BookTheme>(() => {
     try {
-      const saved = localStorage.getItem(READER_THEME_STORAGE_KEY);
+      const saved = safeStorage.getItem(READER_THEME_STORAGE_KEY);
       if (saved && ['midnight', 'parchment', 'slate', 'emerald'].includes(saved)) {
         return saved as BookTheme;
       }
@@ -78,7 +103,7 @@ export default function App() {
 
   const [readerFont, setReaderFont] = useState<BookFont>(() => {
     try {
-      const saved = localStorage.getItem(READER_FONT_STORAGE_KEY);
+      const saved = safeStorage.getItem(READER_FONT_STORAGE_KEY);
       if (saved && ['amiri', 'ruqaa', 'scheherazade', 'naskh', 'serif-ar'].includes(saved)) {
         return saved as BookFont;
       }
@@ -88,7 +113,7 @@ export default function App() {
 
   const [readerFontSizeIndex, setReaderFontSizeIndex] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem(READER_FONT_SIZE_STORAGE_KEY);
+      const saved = safeStorage.getItem(READER_FONT_SIZE_STORAGE_KEY);
       if (saved !== null) {
         const parsed = parseInt(saved, 10);
         if (!isNaN(parsed) && parsed >= 0 && parsed <= 4) {
@@ -101,88 +126,103 @@ export default function App() {
 
   const handleReaderThemeChange = useCallback((newTheme: BookTheme) => {
     setReaderTheme(newTheme);
-    try {
-      localStorage.setItem(READER_THEME_STORAGE_KEY, newTheme);
-    } catch {}
+    safeStorage.setItem(READER_THEME_STORAGE_KEY, newTheme);
   }, []);
+
+  // Sync document body, HTML and meta theme-color with current theme
+  useEffect(() => {
+    const bgMap: Record<BookTheme, { bg: string; text: string }> = {
+      midnight: { bg: '#09090B', text: '#F1EDE6' },
+      parchment: { bg: '#f0eae1', text: '#2b2621' },
+      slate: { bg: '#0f131a', text: '#eef2f7' },
+      emerald: { bg: '#08120d', text: '#f0f7f3' },
+    };
+    const current = bgMap[readerTheme] || bgMap.midnight;
+    document.documentElement.style.backgroundColor = current.bg;
+    document.documentElement.style.color = current.text;
+    document.body.style.backgroundColor = current.bg;
+    document.body.style.color = current.text;
+    const rootEl = document.getElementById('root');
+    if (rootEl) {
+      rootEl.style.backgroundColor = current.bg;
+      rootEl.style.color = current.text;
+    }
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', current.bg);
+    }
+  }, [readerTheme]);
 
   const handleReaderFontChange = useCallback((newFont: BookFont) => {
     setReaderFont(newFont);
-    try {
-      localStorage.setItem(READER_FONT_STORAGE_KEY, newFont);
-    } catch {}
+    safeStorage.setItem(READER_FONT_STORAGE_KEY, newFont);
   }, []);
 
   const handleReaderFontSizeIndexChange = useCallback((updater: number | ((prev: number) => number)) => {
     setReaderFontSizeIndex((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       const clamped = Math.max(0, Math.min(4, next));
-      try {
-        localStorage.setItem(READER_FONT_SIZE_STORAGE_KEY, clamped.toString());
-      } catch {}
+      safeStorage.setItem(READER_FONT_SIZE_STORAGE_KEY, clamped.toString());
       return clamped;
     });
   }, []);
 
-  // Save bookmarks
-  const handleToggleBookmark = (id: string, e?: MouseEvent) => {
+  const handleToggleBookmark = useCallback((id: string, e?: MouseEvent) => {
     if (e) e.stopPropagation();
     setBookmarkedIds((prev) => {
       const updated = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
       try {
-        localStorage.setItem(BOOKMARKS_STORAGE_KEY, JSON.stringify(updated));
+        safeStorage.setItem(BOOKMARKS_STORAGE_KEY, JSON.stringify(updated));
       } catch {
         // Ignore
       }
       return updated;
     });
-  };
+  }, []);
 
-  // Synchronize browser history and hash
   useEffect(() => {
-    try {
-      sessionStorage.setItem(LAST_VIEW_KEY, view);
-      sessionStorage.setItem(LAST_CATEGORY_KEY, selectedCategory);
-    } catch {
-      // Ignore
-    }
+    safeStorage.setSessionItem(LAST_VIEW_KEY, view);
+    safeStorage.setSessionItem(LAST_CATEGORY_KEY, selectedCategory);
   }, [view, selectedCategory]);
 
-  // Handle browser back and forward gestures (popstate)
+  // Handle browser back and forward gestures (popstate) safely
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      const state = event.state;
-      const hash = window.location.hash;
+      try {
+        const state = event.state;
+        const hash = window.location.hash || '';
 
-      if (state && state.view) {
-        setView(state.view);
-        if (state.category) {
-          setSelectedCategory(state.category);
-        }
-        if (state.poemId) {
-          setActivePoemId(state.poemId);
-        }
-      } else if (hash.startsWith('#poem-')) {
-        const id = hash.replace('#poem-', '');
-        const p = POEMS.find((item) => item.id === id);
-        if (p) {
-          setActivePoemId(id);
-          setSelectedCategory(p.category as PoemCategory);
-          setView('reader');
-        } else {
+        if (state && state.view) {
+          setView(state.view);
+          if (state.category) {
+            setSelectedCategory(state.category);
+          }
+          if (state.poemId) {
+            setActivePoemId(state.poemId);
+          }
+        } else if (hash.startsWith('#poem-')) {
+          const id = hash.replace('#poem-', '');
+          const p = POEMS_BY_ID.get(id);
+          if (p) {
+            setActivePoemId(id);
+            if (p.category) {
+              setSelectedCategory(p.category as PoemCategory);
+            }
+            setView('reader');
+          } else {
+            setView('library');
+          }
+        } else if (hash.startsWith('#library')) {
+          const rawCat = hash.replace('#library-', '').replace('#library', '');
+          if (rawCat.length > 0) {
+            setSelectedCategory(rawCat as PoemCategory);
+          }
           setView('library');
+        } else if (hash === '#cover') {
+          setView('cover');
         }
-      } else if (hash.startsWith('#library')) {
-        const rawCat = hash.replace('#library-', '').replace('#library', '');
-        if (rawCat.length > 0) {
-          setSelectedCategory(rawCat as PoemCategory);
-        }
-        setView('library');
-      } else if (hash === '#cover') {
-        setView('cover');
-      } else {
-        // Safe default: return to library with current category rather than cover
-        setView('library');
+      } catch (err) {
+        console.error('Error handling popstate:', err);
       }
     };
 
@@ -192,260 +232,208 @@ export default function App() {
 
   const savedScrollYRef = useRef<number>(0);
 
-  // Category-scoped active poems list for smooth browsing inside poets
+  // Category-scoped active poems list
   const activePoemsList = useMemo(() => {
-    if (selectedCategory === 'sultan') {
-      return POEMS.filter((p) => p.category === 'sultan');
+    if (selectedCategory && selectedCategory !== 'all') {
+      const filtered = POEMS.filter((p) => p.category === selectedCategory);
+      if (filtered.length > 0) return filtered;
     }
-    if (selectedCategory === 'heyam') {
-      return POEMS.filter((p) => p.category === 'heyam');
-    }
-    if (selectedCategory === 'salim') {
-      return POEMS.filter((p) => p.category === 'salim');
-    }
-    if (selectedCategory === 'yaqeen') {
-      return POEMS.filter((p) => p.category === 'yaqeen');
-    }
-    if (selectedCategory === 'saad') {
-      return POEMS.filter((p) => p.category === 'saad');
-    }
-    if (selectedCategory !== 'all') {
-      return POEMS.filter((p) => p.category === selectedCategory);
-    }
-    return POEMS.filter(
-      (p) =>
-        p.category !== 'heyam' &&
-        p.category !== 'sultan' &&
-        p.category !== 'salim' &&
-        p.category !== 'yaqeen' &&
-        p.category !== 'saad'
-    );
+    return POEMS.filter((p) => !POET_CATEGORIES.has(p.category));
   }, [selectedCategory]);
 
-  const activePoemIndexInList = activePoemsList.findIndex((p) => p.id === activePoemId);
-  const currentPoem =
-    activePoemIndexInList !== -1
-      ? activePoemsList[activePoemIndexInList]
-      : POEMS.find((p) => p.id === activePoemId) || POEMS[0];
+  const activePoemIndexInList = useMemo(
+    () => activePoemsList.findIndex((p) => p.id === activePoemId),
+    [activePoemsList, activePoemId]
+  );
 
-  const hasNextInList = activePoemIndexInList < activePoemsList.length - 1;
-  const hasPrevInList = activePoemIndexInList > 0;
+  const currentPoem: Poem = useMemo(() => {
+    if (activePoemIndexInList !== -1 && activePoemsList[activePoemIndexInList]) {
+      return activePoemsList[activePoemIndexInList];
+    }
+    const found = POEMS_BY_ID.get(activePoemId);
+    if (found) return found;
+    return activePoemsList[0] || POEMS[0];
+  }, [activePoemIndexInList, activePoemsList, activePoemId]);
 
-  // Category setter that keeps history in sync
+  const hasNextInList = activePoemIndexInList >= 0 && activePoemIndexInList < activePoemsList.length - 1;
+  const hasPrevInList = activePoemIndexInList > 0 && activePoemIndexInList < activePoemsList.length;
+
   const handleSelectCategory = useCallback((cat: PoemCategory) => {
     setSelectedCategory(cat);
-    try {
-      sessionStorage.setItem(LAST_CATEGORY_KEY, cat);
-      window.history.pushState(
-        { view: 'library', category: cat },
-        '',
-        cat === 'all' ? '#library' : `#library-${cat}`
-      );
-    } catch {
-      // Ignore
-    }
+    safeStorage.setSessionItem(LAST_CATEGORY_KEY, cat);
+    safePushHistory(
+      { view: 'library', category: cat },
+      '',
+      cat === 'all' ? '#library' : `#library-${cat}`
+    );
   }, []);
 
-  // Navigation handlers
   const handleEnterLibrary = useCallback(() => {
     setView('library');
-    try {
-      window.history.pushState(
-        { view: 'library', category: selectedCategory },
-        '',
-        selectedCategory === 'all' ? '#library' : `#library-${selectedCategory}`
-      );
-    } catch {
-      window.location.hash = '#library';
-    }
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    safePushHistory(
+      { view: 'library', category: selectedCategory },
+      '',
+      selectedCategory === 'all' ? '#library' : `#library-${selectedCategory}`
+    );
   }, [selectedCategory]);
 
   const handleBackToCover = useCallback(() => {
     setView('cover');
-    try {
-      window.history.pushState({ view: 'cover' }, '', '#cover');
-    } catch {
-      window.location.hash = '#cover';
-    }
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    safePushHistory({ view: 'cover' }, '', '#cover');
   }, []);
 
   const handleSelectPoem = useCallback(
     (poem: Poem) => {
+      if (!poem) return;
       savedScrollYRef.current = window.scrollY || document.documentElement.scrollTop || 0;
       setActivePoemId(poem.id);
-      if (
-        poem.category &&
-        (poem.category === 'limatha' ||
-          poem.category === 'sultan' ||
-          poem.category === 'heyam' ||
-          poem.category === 'salim' ||
-          poem.category === 'yaqeen' ||
-          poem.category === 'saad')
-      ) {
-        setSelectedCategory(poem.category as PoemCategory);
+      // Preserve 'all' browsing context unless poem belongs to an external poet collection
+      const targetCategory: PoemCategory =
+        selectedCategory === 'all' && !POET_CATEGORIES.has(poem.category)
+          ? 'all'
+          : ((poem.category as PoemCategory) || selectedCategory);
+      if (targetCategory !== selectedCategory) {
+        setSelectedCategory(targetCategory);
       }
       setView('reader');
       window.scrollTo({ top: 0, behavior: 'auto' });
-      try {
-        window.history.pushState(
-          { view: 'reader', poemId: poem.id, category: (poem.category as PoemCategory) || selectedCategory },
-          '',
-          `#poem-${poem.id}`
-        );
-      } catch {
-        window.location.hash = `#poem-${poem.id}`;
-      }
+      safePushHistory(
+        { view: 'reader', poemId: poem.id, category: targetCategory },
+        '',
+        `#poem-${poem.id}`
+      );
     },
     [selectedCategory]
   );
 
   const handleBackToLibrary = useCallback(() => {
-    // If the poem belongs to a specific poet, ensure that poet's category remains active
-    const targetCategory = currentPoem?.category || selectedCategory;
-    setSelectedCategory(targetCategory);
     setView('library');
-    try {
-      window.history.pushState(
-        { view: 'library', category: targetCategory },
-        '',
-        targetCategory === 'all' ? '#library' : `#library-${targetCategory}`
-      );
-    } catch {
-      window.location.hash = targetCategory === 'all' ? '#library' : `#library-${targetCategory}`;
-    }
-  }, [currentPoem, selectedCategory]);
+    safePushHistory(
+      { view: 'library', category: selectedCategory },
+      '',
+      selectedCategory === 'all' ? '#library' : `#library-${selectedCategory}`
+    );
+  }, [selectedCategory]);
 
   const handleNextPoem = useCallback(() => {
-    if (hasNextInList) {
+    if (activePoemIndexInList >= 0 && activePoemIndexInList < activePoemsList.length - 1) {
       const nextPoem = activePoemsList[activePoemIndexInList + 1];
+      if (!nextPoem) return;
       setActivePoemId(nextPoem.id);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      try {
-        window.history.replaceState(
-          { view: 'reader', poemId: nextPoem.id, category: selectedCategory },
-          '',
-          `#poem-${nextPoem.id}`
-        );
-      } catch {
-        window.location.hash = `#poem-${nextPoem.id}`;
-      }
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      safeReplaceHistory(
+        { view: 'reader', poemId: nextPoem.id, category: selectedCategory },
+        '',
+        `#poem-${nextPoem.id}`
+      );
     }
-  }, [hasNextInList, activePoemsList, activePoemIndexInList, selectedCategory]);
+  }, [activePoemsList, activePoemIndexInList, selectedCategory]);
 
   const handlePrevPoem = useCallback(() => {
-    if (hasPrevInList) {
+    if (activePoemIndexInList > 0 && activePoemIndexInList < activePoemsList.length) {
       const prevPoem = activePoemsList[activePoemIndexInList - 1];
+      if (!prevPoem) return;
       setActivePoemId(prevPoem.id);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      try {
-        window.history.replaceState(
-          { view: 'reader', poemId: prevPoem.id, category: selectedCategory },
-          '',
-          `#poem-${prevPoem.id}`
-        );
-      } catch {
-        window.location.hash = `#poem-${prevPoem.id}`;
-      }
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      safeReplaceHistory(
+        { view: 'reader', poemId: prevPoem.id, category: selectedCategory },
+        '',
+        `#poem-${prevPoem.id}`
+      );
     }
-  }, [hasPrevInList, activePoemsList, activePoemIndexInList, selectedCategory]);
+  }, [activePoemsList, activePoemIndexInList, selectedCategory]);
 
   const handleRandomPoem = useCallback(() => {
     const list = activePoemsList.length > 0 ? activePoemsList : POEMS;
     const randomIndex = Math.floor(Math.random() * list.length);
     const randomPoem = list[randomIndex];
+    if (!randomPoem) return;
     setActivePoemId(randomPoem.id);
     setView('reader');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    try {
-      window.history.pushState(
-        { view: 'reader', poemId: randomPoem.id, category: randomPoem.category },
-        '',
-        `#poem-${randomPoem.id}`
-      );
-    } catch {
-      window.location.hash = `#poem-${randomPoem.id}`;
-    }
-  }, [activePoemsList]);
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    safePushHistory(
+      { view: 'reader', poemId: randomPoem.id, category: selectedCategory },
+      '',
+      `#poem-${randomPoem.id}`
+    );
+  }, [activePoemsList, selectedCategory]);
 
   const currentTheme = THEMES[readerTheme] || THEMES.midnight;
 
   return (
-    <div className={`min-h-screen w-full max-w-full ${currentTheme.appBg} ${currentTheme.textPrimary} font-naskh overflow-x-hidden transition-colors duration-500`}>
-      <AnimatePresence mode="wait">
-        {view === 'cover' && (
-          <motion.div
-            key="cover"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.4 }}
-          >
-            <CoverScreen
-              onEnter={handleEnterLibrary}
-              totalPoems={POEMS.length}
-              theme={readerTheme}
-            />
-          </motion.div>
-        )}
+    <div className={`min-h-screen w-full max-w-full ${currentTheme.appBg} ${currentTheme.textPrimary} font-naskh overflow-x-hidden transition-colors duration-200`}>
+      {view === 'cover' && (
+        <motion.div
+          key="cover"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.16 }}
+        >
+          <CoverScreen
+            onEnter={handleEnterLibrary}
+            totalPoems={POEMS.length}
+            theme={readerTheme}
+          />
+        </motion.div>
+      )}
 
-        {view === 'library' && (
-          <motion.div
-            key="library"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35 }}
-          >
-            <LibraryScreen
-              poems={POEMS}
-              onSelectPoem={handleSelectPoem}
-              onBackToCover={handleBackToCover}
-              bookmarkedIds={bookmarkedIds}
-              onToggleBookmark={handleToggleBookmark}
-              onRandomPoem={handleRandomPoem}
-              selectedCategory={selectedCategory}
-              onSelectCategory={handleSelectCategory}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              showBookmarksOnly={showBookmarksOnly}
-              onToggleBookmarksFilter={setShowBookmarksOnly}
-              lastActivePoemId={activePoemId}
-              savedScrollY={savedScrollYRef.current}
-              theme={readerTheme}
-              onThemeChange={handleReaderThemeChange}
-            />
-          </motion.div>
-        )}
+      {view === 'library' && (
+        <motion.div
+          key="library"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.16 }}
+        >
+          <LibraryScreen
+            poems={POEMS}
+            onSelectPoem={handleSelectPoem}
+            onBackToCover={handleBackToCover}
+            bookmarkedIds={bookmarkedIds}
+            onToggleBookmark={handleToggleBookmark}
+            onRandomPoem={handleRandomPoem}
+            selectedCategory={selectedCategory}
+            onSelectCategory={handleSelectCategory}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            showBookmarksOnly={showBookmarksOnly}
+            onToggleBookmarksFilter={setShowBookmarksOnly}
+            lastActivePoemId={activePoemId}
+            savedScrollY={savedScrollYRef.current}
+            theme={readerTheme}
+            onThemeChange={handleReaderThemeChange}
+          />
+        </motion.div>
+      )}
 
-        {view === 'reader' && (
-          <motion.div
-            key={`reader-${currentPoem.id}`}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35 }}
-          >
-            <ReaderScreen
-              poem={currentPoem}
-              onBackToLibrary={handleBackToLibrary}
-              onNextPoem={handleNextPoem}
-              onPrevPoem={handlePrevPoem}
-              hasNext={hasNextInList}
-              hasPrev={hasPrevInList}
-              currentIndex={activePoemIndexInList}
-              totalPoemsCount={activePoemsList.length}
-              isBookmarked={bookmarkedIds.includes(currentPoem.id)}
-              onToggleBookmark={handleToggleBookmark}
-              theme={readerTheme}
-              onThemeChange={handleReaderThemeChange}
-              font={readerFont}
-              onFontChange={handleReaderFontChange}
-              fontSizeIndex={readerFontSizeIndex}
-              onFontSizeIndexChange={handleReaderFontSizeIndexChange}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {view === 'reader' && currentPoem && (
+        <motion.div
+          key="reader"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.16 }}
+        >
+          <ReaderScreen
+            poem={currentPoem}
+            onBackToLibrary={handleBackToLibrary}
+            onNextPoem={handleNextPoem}
+            onPrevPoem={handlePrevPoem}
+            hasNext={hasNextInList}
+            hasPrev={hasPrevInList}
+            currentIndex={activePoemIndexInList}
+            totalPoemsCount={activePoemsList.length}
+            isBookmarked={bookmarkedIds.includes(currentPoem.id)}
+            onToggleBookmark={handleToggleBookmark}
+            theme={readerTheme}
+            onThemeChange={handleReaderThemeChange}
+            font={readerFont}
+            onFontChange={handleReaderFontChange}
+            fontSizeIndex={readerFontSizeIndex}
+            onFontSizeIndexChange={handleReaderFontSizeIndexChange}
+          />
+        </motion.div>
+      )}
     </div>
   );
 }

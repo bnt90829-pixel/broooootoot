@@ -1,18 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
   Bookmark,
-  Sun,
-  Moon,
   Type,
-  Maximize2,
-  Minimize2,
   Copy,
   Check,
-  Sparkles,
   Share2,
   Feather,
 } from 'lucide-react';
@@ -25,6 +20,9 @@ import {
   CornerFiligree,
   DiwanWatermark,
   GazelleInsignia,
+  SilkBookmarkRibbon,
+  AndalusianRosette,
+  toEasternArabicNumerals,
 } from './LiteraryDecorations';
 
 interface ReaderScreenProps {
@@ -46,6 +44,22 @@ interface ReaderScreenProps {
   onFontSizeIndexChange?: (updater: number | ((prev: number) => number)) => void;
 }
 
+const FONT_SIZES = [
+  'text-[15px] sm:text-base leading-[1.62] sm:leading-[1.68]',
+  'text-base sm:text-lg leading-[1.65] sm:leading-[1.72]',
+  'text-lg sm:text-xl leading-[1.68] sm:leading-[1.76]',
+  'text-xl sm:text-2xl leading-[1.7] sm:leading-[1.8]',
+  'text-2xl sm:text-3xl leading-[1.75] sm:leading-[1.85]',
+];
+
+const FONT_CLASS_MAP: Record<BookFont, string> = {
+  amiri: 'font-amiri',
+  ruqaa: 'font-ruqaa',
+  scheherazade: 'font-scheherazade',
+  naskh: 'font-naskh',
+  'serif-ar': 'font-serif-ar',
+};
+
 export function ReaderScreen({
   poem,
   onBackToLibrary,
@@ -53,7 +67,6 @@ export function ReaderScreen({
   onPrevPoem,
   hasNext,
   hasPrev,
-  currentIndex,
   totalPoemsCount,
   isBookmarked,
   onToggleBookmark,
@@ -66,7 +79,7 @@ export function ReaderScreen({
 }: ReaderScreenProps) {
   const [internalTheme, setInternalTheme] = useState<BookTheme>('midnight');
   const [internalFont, setInternalFont] = useState<BookFont>('amiri');
-  const [internalFontSizeIndex, setInternalFontSizeIndex] = useState(2); // 0: sm, 1: base, 2: lg, 3: xl, 4: 2xl
+  const [internalFontSizeIndex, setInternalFontSizeIndex] = useState(2);
 
   const theme = controlledTheme ?? internalTheme;
   const font = controlledFont ?? internalFont;
@@ -100,45 +113,45 @@ export function ReaderScreen({
   const [showSettings, setShowSettings] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
+  const toastTimeoutRef = useRef<number | null>(null);
+  const copyTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
+      if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
+
+  const showToast = useCallback((msg: string) => {
+    if (toastTimeoutRef.current !== null) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => {
+    toastTimeoutRef.current = window.setTimeout(() => {
+      toastTimeoutRef.current = null;
       setToastMessage(null);
-    }, 2500);
-  };
+    }, 2200);
+  }, []);
 
-  const poetName = getPoetNameForPoem(poem);
+  const poetName = useMemo(() => getPoetNameForPoem(poem), [poem]);
 
-  // Normalized poem lines across all categories for cohesive, classical book typography
-  const poemLines = poem.stanzas
-    .flatMap((s) => s.split('\n'))
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  const fontSizes = [
-    'text-[15px] sm:text-base leading-[1.62] sm:leading-[1.68]',
-    'text-base sm:text-lg leading-[1.65] sm:leading-[1.72]',
-    'text-lg sm:text-xl leading-[1.68] sm:leading-[1.76]',
-    'text-xl sm:text-2xl leading-[1.7] sm:leading-[1.8]',
-    'text-2xl sm:text-3xl leading-[1.75] sm:leading-[1.85]',
-  ];
-
-  const fontClassMap: Record<BookFont, string> = {
-    amiri: 'font-amiri',
-    ruqaa: 'font-ruqaa',
-    scheherazade: 'font-scheherazade',
-    naskh: 'font-naskh',
-    'serif-ar': 'font-serif-ar',
-  };
+  // Normalized poem lines memoized per poem
+  const poemLines = useMemo(
+    () =>
+      poem.stanzas
+        .flatMap((s) => s.split('\n'))
+        .map((l) => l.trim())
+        .filter(Boolean),
+    [poem.stanzas]
+  );
 
   // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') {
-        // Next in RTL
         if (hasNext) onNextPoem();
       } else if (e.key === 'ArrowRight') {
-        // Prev in RTL
         if (hasPrev) onPrevPoem();
       } else if (e.key === 'Escape') {
         onBackToLibrary();
@@ -154,20 +167,54 @@ export function ReaderScreen({
 
   const activeTheme = THEMES[theme] || THEMES.midnight;
 
+  const markCopied = useCallback(() => {
+    if (copyTimeoutRef.current !== null) {
+      window.clearTimeout(copyTimeoutRef.current);
+    }
+    setCopied(true);
+    showToast('تم نسخ نص القصيدة كاملاً ❦');
+    copyTimeoutRef.current = window.setTimeout(() => {
+      copyTimeoutRef.current = null;
+      setCopied(false);
+    }, 2000);
+  }, [showToast]);
+
   const handleCopyText = () => {
     const formattedPoemText = poemLines.join('\n');
     const fullText = `«${poem.title}»\nبقلم: ${poetName}\n\n${formattedPoemText}\n\n— ديوان غزالتي`;
-    navigator.clipboard.writeText(fullText).then(() => {
-      setCopied(true);
-      showToast('تم نسخ نص القصيدة كاملاً ❦');
-      setTimeout(() => setCopied(false), 2000);
-    });
+
+    const fallbackCopy = () => {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = fullText;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+        markCopied();
+      } catch {
+        showToast('تعذر النسخ التلقائي');
+      }
+    };
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard
+        .writeText(fullText)
+        .then(markCopied)
+        .catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
   };
 
   const handleShare = async () => {
     const formattedPoemText = poemLines.join('\n');
     const fullText = `«${poem.title}»\nبقلم: ${poetName}\n\n${formattedPoemText}\n\n— ديوان غزالتي`;
-    if (navigator.share) {
+    if (typeof navigator !== 'undefined' && 'share' in navigator && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title: `«${poem.title}» — ${poetName}`,
@@ -176,20 +223,24 @@ export function ReaderScreen({
         });
         showToast('تمت مشاركة القصيدة بنجاح ❦');
         return;
-      } catch {
-        // fallback to copy
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'AbortError') {
+          return;
+        }
+        handleCopyText();
+        return;
       }
     }
     handleCopyText();
   };
 
   const backButtonLabel =
-    poem.category === 'ghazal'
+    poem.category === 'makarah'
+      ? 'مكارهه؟'
+      : poem.category === 'ghazal'
       ? 'غزالتي'
       : poem.category === 'limatha'
       ? 'لماذا؟'
-      : poem.category === 'nathr'
-      ? 'نثر غزالتي'
       : poem.category === 'inkisar'
       ? 'الإنكسار'
       : poem.category === 'habr'
@@ -207,12 +258,12 @@ export function ReaderScreen({
       : 'المكتبة والفهرس';
 
   const footerCredit =
-    poem.category === 'ghazal'
+    poem.category === 'makarah'
+      ? '«مكارهه؟»'
+      : poem.category === 'ghazal'
       ? '«غزالتي»'
       : poem.category === 'limatha'
       ? '«لماذا؟»'
-      : poem.category === 'nathr'
-      ? '«نثر غزالتي»'
       : poem.category === 'inkisar'
       ? '«الإنكسار»'
       : poem.category === 'habr'
@@ -232,16 +283,17 @@ export function ReaderScreen({
   return (
     <div
       id="reader-screen-container"
-      className={`min-h-screen w-full ${activeTheme.appBg} transition-colors duration-500 flex flex-col justify-between select-none selection:bg-[#c5a059]/30 overflow-x-hidden font-serif relative`}
+      className={`min-h-screen w-full ${activeTheme.appBg} transition-colors duration-200 flex flex-col justify-between select-none selection:bg-[#c5a059]/30 overflow-x-hidden font-serif relative`}
     >
       {/* Toast feedback notification */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 15, scale: 0.95 }}
-            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full bg-[#15171e] text-[#f7f4ee] border border-[#c5a059] shadow-2xl text-xs sm:text-sm font-serif flex items-center gap-2 backdrop-blur-md"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.15 }}
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full bg-[#15171e] text-[#f7f4ee] border border-[#c5a059] shadow-2xl text-xs sm:text-sm font-serif flex items-center gap-2"
           >
             <span className="text-[#c5a059] text-base">❦</span>
             <span>{toastMessage}</span>
@@ -250,13 +302,13 @@ export function ReaderScreen({
       </AnimatePresence>
 
       {/* Top Reading Navigation Bar */}
-      <header className={`sticky top-0 z-30 ${activeTheme.headerBg} backdrop-blur-md border-b ${activeTheme.headerBorder} px-3 sm:px-8 py-3 transition-colors duration-500 w-full`}>
+      <header className={`sticky top-0 z-30 ${activeTheme.headerBg} border-b ${activeTheme.headerBorder} px-3 sm:px-8 py-3 transition-colors duration-200 w-full`}>
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Return to Library */}
           <button
             id="reader-back-to-library-btn"
             onClick={onBackToLibrary}
-            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} hover:${activeTheme.textPrimary} hover:${activeTheme.accentBorder} transition-all text-xs sm:text-sm cursor-pointer shadow-sm`}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} ${activeTheme.textPrimaryHover} ${activeTheme.cardHoverBorder} transition-colors text-xs sm:text-sm cursor-pointer shadow-sm`}
           >
             <ArrowRight size={15} />
             <span className="font-serif">{backButtonLabel}</span>
@@ -276,51 +328,47 @@ export function ReaderScreen({
 
           {/* Right/Left Toolbar controls */}
           <div className="flex items-center gap-1 sm:gap-2">
-            {/* Share button */}
             <button
               id="reader-share-btn"
               onClick={handleShare}
-              className={`p-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} hover:${activeTheme.textPrimary} hover:${activeTheme.accentBorder} transition-all text-xs cursor-pointer`}
+              className={`p-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} ${activeTheme.textPrimaryHover} ${activeTheme.cardHoverBorder} transition-colors text-xs cursor-pointer`}
               title="مشاركة القصيدة"
             >
               <Share2 size={15} />
             </button>
 
-            {/* Bookmark button */}
             <button
               id="reader-bookmark-btn"
               onClick={() => {
                 onToggleBookmark(poem.id);
                 showToast(isBookmarked ? 'تمت إزالة القصيدة من المحفوظات' : 'تم حفظ القصيدة في المحفوظات ❦');
               }}
-              className={`p-2 rounded-sm border transition-all text-xs cursor-pointer ${
+              className={`p-2 rounded-sm border transition-colors text-xs cursor-pointer ${
                 isBookmarked
                   ? 'border-[#c5a059] bg-[#c5a059] text-[#0a0a0c]'
-                  : `${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} hover:${activeTheme.textPrimary} hover:${activeTheme.accentBorder}`
+                  : `${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} ${activeTheme.textPrimaryHover} ${activeTheme.cardHoverBorder}`
               }`}
               title={isBookmarked ? 'إزالة من المحفوظات' : 'حفظ في المحفوظات'}
             >
               <Bookmark size={15} className={isBookmarked ? 'fill-[#0a0a0c]' : ''} />
             </button>
 
-            {/* Copy verse */}
             <button
               id="copy-verse-btn"
               onClick={handleCopyText}
-              className={`p-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} hover:${activeTheme.textPrimary} hover:${activeTheme.accentBorder} transition-all text-xs cursor-pointer`}
+              className={`p-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} ${activeTheme.textPrimaryHover} ${activeTheme.cardHoverBorder} transition-colors text-xs cursor-pointer`}
               title="نسخ نص القصيدة"
             >
               {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
             </button>
 
-            {/* Typography / Theme settings toggle */}
             <button
               id="reader-settings-toggle-btn"
               onClick={() => setShowSettings(!showSettings)}
-              className={`p-2 rounded-sm border transition-all text-xs cursor-pointer ${
+              className={`p-2 rounded-sm border transition-colors text-xs cursor-pointer ${
                 showSettings
                   ? `${activeTheme.accentBorder} ${activeTheme.accentBg} ${activeTheme.accent}`
-                  : `${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} hover:${activeTheme.textPrimary} hover:${activeTheme.accentBorder}`
+                  : `${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textSecondary} ${activeTheme.textPrimaryHover} ${activeTheme.cardHoverBorder}`
               }`}
               title="تخصيص الخط ونمط الصفحة"
             >
@@ -334,10 +382,11 @@ export function ReaderScreen({
       <AnimatePresence>
         {showSettings && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className={`sticky top-[53px] z-20 ${activeTheme.cardBg} backdrop-blur-md border-b ${activeTheme.cardBorder} px-4 py-3.5 shadow-2xl transition-colors duration-500`}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.15 }}
+            className={`sticky top-[53px] z-20 ${activeTheme.cardBg} border-b ${activeTheme.cardBorder} px-4 py-3.5 shadow-xl transition-colors duration-200`}
           >
             <div className={`max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs ${activeTheme.textSecondary}`}>
               {/* Themes Selector */}
@@ -426,16 +475,16 @@ export function ReaderScreen({
                   <button
                     disabled={fontSizeIndex <= 0}
                     onClick={() => setFontSizeIndex((i) => Math.max(0, i - 1))}
-                    className={`w-7 h-7 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.appBg} ${activeTheme.textPrimary} flex items-center justify-center disabled:opacity-30 hover:${activeTheme.accentBorder} cursor-pointer font-bold`}
+                    className={`w-7 h-7 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.appBg} ${activeTheme.textPrimary} flex items-center justify-center disabled:opacity-30 ${activeTheme.cardHoverBorder} cursor-pointer font-bold`}
                     title="تصغير الخط"
                   >
                     -
                   </button>
                   <span className="px-1 text-[11px] font-mono text-center min-w-[20px]">{fontSizeIndex + 1}</span>
                   <button
-                    disabled={fontSizeIndex >= fontSizes.length - 1}
-                    onClick={() => setFontSizeIndex((i) => Math.min(fontSizes.length - 1, i + 1))}
-                    className={`w-7 h-7 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.appBg} ${activeTheme.textPrimary} flex items-center justify-center disabled:opacity-30 hover:${activeTheme.accentBorder} cursor-pointer font-bold`}
+                    disabled={fontSizeIndex >= FONT_SIZES.length - 1}
+                    onClick={() => setFontSizeIndex((i) => Math.min(FONT_SIZES.length - 1, i + 1))}
+                    className={`w-7 h-7 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.appBg} ${activeTheme.textPrimary} flex items-center justify-center disabled:opacity-30 ${activeTheme.cardHoverBorder} cursor-pointer font-bold`}
                     title="تكبير الخط"
                   >
                     +
@@ -449,13 +498,13 @@ export function ReaderScreen({
 
       {/* Main Container with Decorative Lateral Margins on Wide Desktops */}
       <div className="relative flex-1 w-full flex items-center justify-center py-6 sm:py-10 md:py-14 px-3 sm:px-6 md:px-8">
-        {/* Subtle radial aura behind book page */}
+        {/* Soft GPU-free radial aura behind book page */}
         <div
-          className="absolute inset-0 pointer-events-none opacity-40 blur-3xl transition-colors duration-700"
+          className="absolute inset-0 pointer-events-none"
           style={{
             background: `radial-gradient(circle at center, ${
-              activeTheme.isLight ? 'rgba(212, 175, 55, 0.12)' : 'rgba(197, 160, 89, 0.08)'
-            } 0%, transparent 70%)`,
+              activeTheme.isLight ? 'rgba(212, 175, 55, 0.08)' : 'rgba(197, 160, 89, 0.05)'
+            } 0%, transparent 68%)`,
           }}
         />
 
@@ -485,195 +534,195 @@ export function ReaderScreen({
           <div className="w-px h-20 bg-gradient-to-t from-current via-current to-transparent" />
         </div>
 
-        {/* Main Book Reader Page - Unified intimate manuscript design identical to poet Ifrahim */}
+        {/* Main Book Reader Page */}
         <main className="relative z-10 w-full max-w-2xl mx-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={poem.id}
-              initial={{ opacity: 0, y: 15, scale: 0.985 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -15, scale: 0.985 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-              id="book-physical-page"
-              className={`relative w-full rounded-md border ${activeTheme.pageBorder} ${activeTheme.pageBg} p-6 sm:p-10 md:p-12 ${activeTheme.spineShadow} transition-all duration-500 overflow-hidden shadow-2xl`}
+          <motion.div
+            key={poem.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            id="book-physical-page"
+            className={`relative w-full rounded-md border ${activeTheme.pageBorder} ${activeTheme.pageBg} p-6 sm:p-10 md:p-12 ${activeTheme.spineShadow} transition-colors duration-200 overflow-hidden shadow-2xl`}
+          >
+            {/* Hanging Silk Bookmark Ribbon */}
+            <SilkBookmarkRibbon
+              isBookmarked={isBookmarked}
+              onClick={() => {
+                onToggleBookmark(poem.id);
+                showToast(isBookmarked ? 'تمت إزالة العلامة المرجعية' : 'تم تعليق العلامة المرجعية الحريرية ❦');
+              }}
+            />
+
+            {/* Delicate double-line hairline inner manuscript frame */}
+            <div
+              className={`absolute inset-2 sm:inset-3.5 border border-current pointer-events-none rounded-[3px] ${
+                activeTheme.isLight ? 'opacity-15' : 'opacity-10'
+              }`}
+            />
+
+            {/* Classical Antique Corner Filigrees */}
+            <CornerFiligree
+              position="tr"
+              className="top-2 sm:top-3.5 right-2 sm:right-3.5"
+              color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
+            />
+            <CornerFiligree
+              position="tl"
+              className="top-2 sm:top-3.5 left-2 sm:left-3.5"
+              color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
+            />
+            <CornerFiligree
+              position="br"
+              className="bottom-2 sm:bottom-3.5 right-2 sm:right-3.5"
+              color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
+            />
+            <CornerFiligree
+              position="bl"
+              className="bottom-2 sm:bottom-3.5 left-2 sm:left-3.5"
+              color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
+            />
+
+            {/* Background Manuscript Subtle Watermark */}
+            <DiwanWatermark className={activeTheme.isLight ? 'text-[#8c6d37]' : 'text-[#c5a059]'} />
+
+            {/* Top Page Header (Chapter, Page Num, Symbol) */}
+            <div
+              className={`relative z-10 flex items-center justify-between border-b ${
+                activeTheme.isLight ? 'border-[#8c6d37]/20' : 'border-current/15'
+              } pb-3 sm:pb-4 mb-4 sm:mb-6 pr-10 sm:pr-12`}
             >
-              {/* Delicate double-line hairline inner manuscript frame */}
-              <div
-                className={`absolute inset-2 sm:inset-3.5 border border-current pointer-events-none rounded-[3px] ${
-                  activeTheme.isLight ? 'opacity-15' : 'opacity-10'
-                }`}
-              />
+              <div className="flex items-center gap-2">
+                <SurrealSymbol symbol={poem.symbol} size={16} className={activeTheme.accent} />
+                <span className={`text-[12px] font-amiri tracking-wider ${activeTheme.accent} font-bold`}>
+                  {poem.chapter}
+                </span>
+                <span className={`text-[11px] font-amiri ${activeTheme.accent} ${activeTheme.accentBg} border ${activeTheme.accentBorder} px-2.5 py-0.5 rounded-sm font-bold flex items-center gap-1`}>
+                  <AndalusianRosette size={9} color="currentColor" />
+                  <span>مخطوطة #{toEasternArabicNumerals(poem.pageNumber)}</span>
+                </span>
+              </div>
+              <span className={`text-[11px] font-amiri tracking-wider ${activeTheme.textSecondary} font-medium`}>
+                صفحة {toEasternArabicNumerals(poem.pageNumber)} من {toEasternArabicNumerals(totalPoemsCount)}
+              </span>
+            </div>
 
-              {/* Classical Antique Corner Filigrees */}
-              <CornerFiligree
-                position="tr"
-                className="top-2 sm:top-3.5 right-2 sm:right-3.5"
-                color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
-              />
-              <CornerFiligree
-                position="tl"
-                className="top-2 sm:top-3.5 left-2 sm:left-3.5"
-                color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
-              />
-              <CornerFiligree
-                position="br"
-                className="bottom-2 sm:bottom-3.5 right-2 sm:right-3.5"
-                color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
-              />
-              <CornerFiligree
-                position="bl"
-                className="bottom-2 sm:bottom-3.5 left-2 sm:left-3.5"
-                color={activeTheme.isLight ? '#8c6d37' : '#c5a059'}
-              />
+            {/* Center Title & Poet Headpiece */}
+            <div className="relative z-10 text-center mb-6 sm:mb-8">
+              <div className="flex items-center justify-center gap-2.5 mb-2 opacity-75">
+                <span className={`text-xs ${activeTheme.accent}`}>❦</span>
+                <span className="w-8 h-px bg-gradient-to-r from-transparent to-[#c5a059]" />
+                <AndalusianRosette size={14} color={activeTheme.isLight ? '#8c6d37' : '#c5a059'} />
+                <span className="w-8 h-px bg-gradient-to-l from-transparent to-[#c5a059]" />
+                <span className={`text-xs ${activeTheme.accent}`}>❦</span>
+              </div>
 
-              {/* Background Manuscript Subtle Watermark (Does not impair text clarity) */}
-              <DiwanWatermark className={activeTheme.isLight ? 'text-[#8c6d37]' : 'text-[#c5a059]'} />
-
-              {/* Top Page Header (Chapter, Page Num, Symbol) */}
-              <div
-                className={`relative z-10 flex items-center justify-between border-b ${
-                  activeTheme.isLight ? 'border-[#8c6d37]/20' : 'border-current/15'
-                } pb-3 sm:pb-4 mb-4 sm:mb-6`}
+              <h2
+                id="active-poem-title"
+                className={`font-amiri text-3xl sm:text-4xl md:text-5xl font-bold ${activeTheme.textPrimary} mb-2 sm:mb-3 tracking-wide leading-tight drop-shadow-sm`}
               >
-                <div className="flex items-center gap-2">
-                  <SurrealSymbol symbol={poem.symbol} size={16} className={activeTheme.accent} />
-                  <span className={`text-[11px] font-mono tracking-widest uppercase ${activeTheme.accent} font-semibold`}>
-                    {poem.chapter}
-                  </span>
-                  <span className={`text-[10px] font-mono ${activeTheme.accent} ${activeTheme.accentBg} border ${activeTheme.accentBorder} px-2 py-0.5 rounded-sm`}>
-                    نص #{poem.pageNumber}
-                  </span>
-                </div>
-                <span className={`text-[11px] font-mono tracking-widest ${activeTheme.textSecondary} font-medium`}>
-                  صفحة {poem.pageNumber} من {totalPoemsCount}
+                «{poem.title}»
+              </h2>
+
+              <div className="inline-flex items-center justify-center gap-1.5 px-4 py-1 rounded-full bg-current/5 border border-current/15 mt-1 mb-2">
+                <Feather size={12} className={activeTheme.accent} />
+                <span className={`text-xs sm:text-sm font-amiri font-bold ${activeTheme.accent} tracking-wide`}>
+                  بقلم الشاعر: {poetName}
                 </span>
               </div>
 
-              {/* Center Title & Poet Headpiece - Exactly matching Ifrahim */}
-              <div className="relative z-10 text-center mb-6 sm:mb-8">
-                {/* Upper delicate Arabesque flourish */}
-                <div className="flex items-center justify-center gap-2 mb-2 opacity-70">
-                  <span className={`text-xs ${activeTheme.accent}`}>❦</span>
-                  <span className="w-8 h-px bg-gradient-to-r from-transparent to-[#c5a059]" />
-                  <span className={`text-sm ${activeTheme.accent}`}>❖</span>
-                  <span className="w-8 h-px bg-gradient-to-l from-transparent to-[#c5a059]" />
-                  <span className={`text-xs ${activeTheme.accent}`}>❦</span>
-                </div>
+              <ArabesqueDivider color={activeTheme.isLight ? '#8c6d37' : '#c5a059'} className="mt-2 opacity-80" />
+            </div>
 
-                {/* Main Poem Title */}
-                <h2
-                  id="active-poem-title"
-                  className={`font-amiri text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold ${activeTheme.textPrimary} mb-2 sm:mb-3 tracking-wide leading-tight`}
-                >
-                  {poem.title}
-                </h2>
-
-                {/* Distinct Poet Name Attribution */}
-                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-1 rounded-full bg-current/5 border border-current/15 mt-1 mb-2">
-                  <Feather size={12} className={activeTheme.accent} />
-                  <span className={`text-xs sm:text-sm font-serif font-semibold ${activeTheme.accent} tracking-wide`}>
-                    بقلم: {poetName}
-                  </span>
-                </div>
-
-                {/* Symmetrical Arabic divider */}
-                <ArabesqueDivider color={activeTheme.isLight ? '#8c6d37' : '#c5a059'} className="mt-2 opacity-80" />
-              </div>
-
-              {/* Poem Verses - Unified, cohesive, book-like poetic block */}
-              <div className="relative z-10 my-2 sm:my-4 flex flex-col items-center justify-center select-text w-full">
-                <div
-                  className={`w-full max-w-[340px] sm:max-w-[420px] md:max-w-[460px] mx-auto text-center ${fontClassMap[font]} ${activeTheme.textPrimary}`}
-                >
-                  <div className="flex flex-col items-center text-center space-y-1 sm:space-y-1.5 w-full">
-                    {poemLines.map((line, lIdx) => {
-                      const hasDoubleHemistich = line.includes('***');
-
-                      if (hasDoubleHemistich) {
-                        const [sadr, ajuz] = line.split('***');
-                        return (
-                          <div
-                            key={lIdx}
-                            className={`w-full ${fontSizes[fontSizeIndex]} font-normal tracking-normal transition-all text-center [text-wrap:balance] break-words`}
-                          >
-                            <div className="flex flex-wrap items-center justify-center gap-x-2.5 sm:gap-x-3.5 gap-y-0.5 text-center">
-                              <span>{sadr.trim()}</span>
-                              <span className="text-[#c5a059] text-[10px] sm:text-xs opacity-60 select-none px-0.5">✦</span>
-                              <span>{ajuz?.trim()}</span>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <p
-                          key={lIdx}
-                          className={`w-full ${fontSizes[fontSizeIndex]} font-normal tracking-normal transition-all text-center [text-wrap:balance] break-words m-0`}
-                        >
-                          {line}
-                        </p>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Optional poetic footnotes / note */}
-              {poem.notes && (
-                <div
-                  className={`relative z-10 mt-6 pt-3 border-t ${activeTheme.divider} text-xs ${activeTheme.textSecondary} text-center font-naskh not-italic opacity-80`}
-                >
-                  {poem.notes}
-                </div>
-              )}
-
-              {/* Bottom page footnote */}
+            {/* Poem Verses */}
+            <div className="relative z-10 my-2 sm:my-4 flex flex-col items-center justify-center select-text w-full">
               <div
-                className={`relative z-10 mt-4 pt-3 flex items-center justify-between text-[10px] font-mono uppercase tracking-widest ${activeTheme.textSecondary} opacity-60 border-t border-dashed border-current/20`}
+                className={`w-full max-w-[340px] sm:max-w-[420px] md:max-w-[460px] mx-auto text-center ${FONT_CLASS_MAP[font]} ${activeTheme.textPrimary}`}
               >
-                <span>{footerCredit}</span>
-                <span>{poem.chapter}</span>
+                <div className="flex flex-col items-center text-center space-y-1 sm:space-y-1.5 w-full">
+                  {poemLines.map((line, lIdx) => {
+                    const hasDoubleHemistich = line.includes('***');
+
+                    if (hasDoubleHemistich) {
+                      const [sadr, ajuz] = line.split('***');
+                      return (
+                        <div
+                          key={lIdx}
+                          className={`w-full ${FONT_SIZES[fontSizeIndex]} font-normal tracking-normal text-center [text-wrap:balance] break-words`}
+                        >
+                          <div className="flex flex-wrap items-center justify-center gap-x-2.5 sm:gap-x-3.5 gap-y-0.5 text-center">
+                            <span>{sadr.trim()}</span>
+                            <span className="text-[#c5a059] text-[10px] sm:text-xs opacity-60 select-none px-0.5">✦</span>
+                            <span>{ajuz?.trim()}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <p
+                        key={lIdx}
+                        className={`w-full ${FONT_SIZES[fontSizeIndex]} font-normal tracking-normal text-center [text-wrap:balance] break-words m-0`}
+                      >
+                        {line}
+                      </p>
+                    );
+                  })}
+                </div>
               </div>
-            </motion.div>
-          </AnimatePresence>
+            </div>
+
+            {/* Optional poetic footnotes */}
+            {poem.notes && (
+              <div
+                className={`relative z-10 mt-6 pt-3 border-t ${activeTheme.divider} text-xs ${activeTheme.textSecondary} text-center font-naskh not-italic opacity-80`}
+              >
+                {poem.notes}
+              </div>
+            )}
+
+            {/* Bottom page footnote */}
+            <div
+              className={`relative z-10 mt-4 pt-3 flex items-center justify-between text-[10px] font-mono uppercase tracking-widest ${activeTheme.textSecondary} opacity-60 border-t border-dashed border-current/20`}
+            >
+              <span>{footerCredit}</span>
+              <span>{poem.chapter}</span>
+            </div>
+          </motion.div>
         </main>
       </div>
 
       {/* Bottom Floating Navigation Toolbar */}
-      <footer className={`sticky bottom-0 z-30 ${activeTheme.headerBg} backdrop-blur-md border-t ${activeTheme.headerBorder} px-3 sm:px-8 py-3 transition-colors duration-500 w-full`}>
+      <footer className={`sticky bottom-0 z-30 ${activeTheme.headerBg} border-t ${activeTheme.headerBorder} px-3 sm:px-8 py-3 transition-colors duration-200 w-full`}>
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
-          {/* Previous Page Button */}
           <button
             id="prev-page-button"
             disabled={!hasPrev}
             onClick={onPrevPoem}
-            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textPrimary} disabled:opacity-30 disabled:pointer-events-none hover:${activeTheme.accentBorder} transition-all text-xs sm:text-sm cursor-pointer shadow-sm`}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textPrimary} disabled:opacity-30 disabled:pointer-events-none ${activeTheme.cardHoverBorder} transition-colors text-xs sm:text-sm cursor-pointer shadow-sm`}
           >
             <ChevronRight size={16} />
             <span className="font-serif">الصفحة السابقة</span>
           </button>
 
-          {/* Center Page Counter Badge & Quick Back to Library */}
           <button
             id="reader-footer-index-btn"
             onClick={onBackToLibrary}
-            className="text-center font-mono px-3 py-1 rounded hover:bg-white/5 transition-colors cursor-pointer group"
+            className="group text-center font-mono px-3 py-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
             title="الرجوع إلى الفهرس والمكتبة"
           >
-            <span className={`text-xs sm:text-sm ${activeTheme.accent} font-bold block tracking-wider group-hover:underline`}>
-              ص {poem.pageNumber}
+            <span className={`text-xs sm:text-sm ${activeTheme.accent} font-bold block tracking-wider group-hover:underline font-amiri`}>
+              صـ. {toEasternArabicNumerals(poem.pageNumber)}
             </span>
-            <span className={`text-[10px] ${activeTheme.textSecondary} block tracking-widest group-hover:${activeTheme.textPrimary}`}>
+            <span className={`text-[10px] ${activeTheme.textSecondary} block tracking-widest ${activeTheme.textPrimaryGroupHover}`}>
               {poem.categoryTitle}
             </span>
           </button>
 
-          {/* Next Page Button */}
           <button
             id="next-page-button"
             disabled={!hasNext}
             onClick={onNextPoem}
-            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textPrimary} disabled:opacity-30 disabled:pointer-events-none hover:${activeTheme.accentBorder} transition-all text-xs sm:text-sm cursor-pointer shadow-sm`}
+            className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 rounded-sm border ${activeTheme.cardBorder} ${activeTheme.cardBg} ${activeTheme.textPrimary} disabled:opacity-30 disabled:pointer-events-none ${activeTheme.cardHoverBorder} transition-colors text-xs sm:text-sm cursor-pointer shadow-sm`}
           >
             <span className="font-serif">الصفحة التالية</span>
             <ChevronLeft size={16} />

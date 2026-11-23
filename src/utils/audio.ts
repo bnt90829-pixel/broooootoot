@@ -8,7 +8,7 @@ class AmbientSoundscape {
   private isPlaying: boolean = false;
   private gainNode: GainNode | null = null;
   private oscillators: OscillatorNode[] = [];
-  private intervals: number[] = [];
+  private stopTimeoutId: number | null = null;
 
   public toggle(): boolean {
     if (this.isPlaying) {
@@ -24,24 +24,51 @@ class AmbientSoundscape {
     return this.isPlaying;
   }
 
+  private clearOscillators() {
+    this.oscillators.forEach((osc) => {
+      try {
+        osc.stop();
+        osc.disconnect();
+      } catch {
+        // Ignore already stopped oscillators
+      }
+    });
+    this.oscillators = [];
+    if (this.gainNode) {
+      try {
+        this.gainNode.disconnect();
+      } catch {
+        // Ignore
+      }
+      this.gainNode = null;
+    }
+  }
+
   public start() {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (this.stopTimeoutId !== null) {
+        window.clearTimeout(this.stopTimeoutId);
+        this.stopTimeoutId = null;
+      }
+      this.clearOscillators();
+
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!this.ctx) {
         this.ctx = new AudioCtx();
       }
 
       if (this.ctx.state === 'suspended') {
-        this.ctx.resume();
+        void this.ctx.resume();
       }
 
       const now = this.ctx.currentTime;
       this.gainNode = this.ctx.createGain();
       this.gainNode.gain.setValueAtTime(0.001, now);
-      this.gainNode.gain.exponentialRampToValueAtTime(0.04, now + 3);
+      this.gainNode.gain.exponentialRampToValueAtTime(0.04, now + 2.5);
       this.gainNode.connect(this.ctx.destination);
 
-      // Low ethereal drone chords (surreal deep harmonics)
       const freqs = [108, 162, 216, 324];
       this.oscillators = [];
 
@@ -73,30 +100,33 @@ class AmbientSoundscape {
 
       this.isPlaying = true;
     } catch {
-      // Audio context might be restricted before user gesture
       this.isPlaying = false;
     }
   }
 
   public stop() {
-    if (!this.ctx || !this.gainNode) return;
+    this.isPlaying = false;
+    if (!this.ctx || !this.gainNode) {
+      this.clearOscillators();
+      return;
+    }
     try {
       const now = this.ctx.currentTime;
-      this.gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
-      setTimeout(() => {
-        this.oscillators.forEach(osc => {
-          try {
-            osc.stop();
-            osc.disconnect();
-          } catch {
-            // Ignore
-          }
-        });
-        this.oscillators = [];
-        this.isPlaying = false;
-      }, 1600);
+      this.gainNode.gain.cancelScheduledValues(now);
+      this.gainNode.gain.setValueAtTime(Math.max(this.gainNode.gain.value, 0.0001), now);
+      this.gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+
+      if (this.stopTimeoutId !== null) {
+        window.clearTimeout(this.stopTimeoutId);
+      }
+      this.stopTimeoutId = window.setTimeout(() => {
+        this.stopTimeoutId = null;
+        if (!this.isPlaying) {
+          this.clearOscillators();
+        }
+      }, 1300);
     } catch {
-      this.isPlaying = false;
+      this.clearOscillators();
     }
   }
 }
